@@ -469,5 +469,3 @@ You’ve successfully deployed a **production-grade DevOps Accelerator**, with:
 *  Lambda-powered backend (serverless)
 *  Frontend hosted via S3 + CloudFront
 *  Monitoring + Email notifications via CloudWatch + SNS
-
-*Happy DevOps-ing!*
