@@ -6,6 +6,7 @@ on:
             - "frontend/**"
         branches:
             - main
+    workflow_dispatch: # Allows manual trigger from GitHub UI
 
 env:
     AWS_REGION: us-east-1
@@ -22,18 +23,35 @@ jobs:
               uses: actions/checkout@v4
 
             - name: Configure AWS credentials
-              uses: aws-actions/configure-aws-credentials@v2
+              uses: aws-actions/configure-aws-credentials@v4
               with:
                   aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
                   aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
                   aws-region: ${{ env.AWS_REGION }}
 
+            # Pro-Step: Sync with Cache-Control
+            # This makes the site load faster for users while ensuring updates work
             - name: Sync files to S3
               run: |
-                  aws s3 sync frontend/ s3://${{ env.S3_BUCKET }} --delete
+                  # 1. Sync all files with a long cache (1 year)
+                  aws s3 sync frontend/ s3://${{ env.S3_BUCKET }} --delete --cache-control "max-age=31536000"
+
+                  # 2. Re-upload index.html with NO CACHE so users always get the latest version
+                  aws s3 cp frontend/index.html s3://${{ env.S3_BUCKET }}/index.html --cache-control "no-cache"
 
             - name: Invalidate CloudFront cache
               run: |
-                  aws cloudfront create-invalidation \
+                  echo "Creating CloudFront invalidation..."
+                  INVALIDATION_ID=$(aws cloudfront create-invalidation \
                     --distribution-id ${{ env.CLOUDFRONT_DIST_ID }} \
-                    --paths "/*"
+                    --paths "/*" \
+                    --query 'Invalidation.Id' \
+                    --output text)
+                  echo "Invalidation ID: $INVALIDATION_ID"
+
+                  # Best Practice: Wait for the invalidation to complete
+                  echo "Waiting for invalidation to finish..."
+                  aws cloudfront wait invalidation-completed \
+                    --distribution-id ${{ env.CLOUDFRONT_DIST_ID }} \
+                    --id $INVALIDATION_ID
+                  echo "Frontend deployment is now LIVE globally!"

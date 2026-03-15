@@ -3,18 +3,21 @@ name: Deploy Backend Lambda
 on:
     push:
         paths:
-            - "backend/process-uploaded-file/**"
+            - "backend/**" # Triggers on any backend change
         branches:
             - main
     workflow_dispatch:
 
 env:
     AWS_REGION: us-east-1
-    LAMBDA_FUNCTION_NAME: ${{ secrets.LAMBDA_FUNCTION_NAME }}
+    # Note: If you have two lambdas, it's better to name them explicitly
+    # rather than using one generic secret.
+    PROCESS_LAMBDA: "process-uploaded-file"
+    GENERATE_LAMBDA: "generate-presigned-url"
 
 jobs:
     deploy:
-        name: Update Lambda Function
+        name: Build and Deploy
         runs-on: ubuntu-latest
 
         steps:
@@ -22,19 +25,36 @@ jobs:
               uses: actions/checkout@v4
 
             - name: Configure AWS credentials
-              uses: aws-actions/configure-aws-credentials@v2
+              uses: aws-actions/configure-aws-credentials@v4
               with:
                   aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
                   aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
                   aws-region: ${{ env.AWS_REGION }}
 
-            - name: Zip Lambda function code
+            # Best Practice: Use a specific Python version for consistency
+            - name: Set up Python
+              uses: actions/setup-python@v5
+              with:
+                  python-version: "3.12"
+
+            - name: Zip and Deploy Process Lambda
               run: |
                   cd backend/process-uploaded-file
-                  zip -r lambda.zip .
-
-            - name: Update Lambda code
-              run: |
+                  zip -r process_lambda.zip .
                   aws lambda update-function-code \
-                    --function-name ${{ env.LAMBDA_FUNCTION_NAME }} \
-                    --zip-file fileb://backend/process-uploaded-file/lambda.zip
+                    --function-name ${{ env.PROCESS_LAMBDA }} \
+                    --zip-file fileb://process_lambda.zip
+
+            - name: Zip and Deploy Generate URL Lambda
+              run: |
+                  cd backend/generate-presigned-url
+                  zip -r generate_lambda.zip .
+                  aws lambda update-function-code \
+                    --function-name ${{ env.GENERATE_LAMBDA }} \
+                    --zip-file fileb://generate_lambda.zip
+
+            # Observability: Confirm the deployment actually worked
+            - name: Verify Deployment
+              run: |
+                  aws lambda wait function-updated --function-name ${{ env.PROCESS_LAMBDA }}
+                  echo "Deployment successful!"
