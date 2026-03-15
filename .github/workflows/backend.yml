@@ -1,23 +1,20 @@
-name: Deploy Backend Lambda
+name: Deploy Frontend to S3 and Invalidate CloudFront
 
 on:
     push:
         paths:
-            - "backend/**" # Triggers on any backend change
+            - "frontend/**"
         branches:
             - main
-    workflow_dispatch:
 
 env:
     AWS_REGION: us-east-1
-    # Note: If you have two lambdas, it's better to name them explicitly
-    # rather than using one generic secret.
-    PROCESS_LAMBDA: "process-uploaded-file"
-    GENERATE_LAMBDA: "generate-presigned-url"
+    S3_BUCKET: ${{ secrets.FRONTEND_BUCKET_NAME }}
+    CLOUDFRONT_DIST_ID: ${{ secrets.CLOUDFRONT_DIST_ID }}
 
 jobs:
     deploy:
-        name: Build and Deploy
+        name: Upload to S3 and Invalidate CloudFront
         runs-on: ubuntu-latest
 
         steps:
@@ -25,36 +22,18 @@ jobs:
               uses: actions/checkout@v4
 
             - name: Configure AWS credentials
-              uses: aws-actions/configure-aws-credentials@v4
+              uses: aws-actions/configure-aws-credentials@v2
               with:
                   aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
                   aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
                   aws-region: ${{ env.AWS_REGION }}
 
-            # Best Practice: Use a specific Python version for consistency
-            - name: Set up Python
-              uses: actions/setup-python@v5
-              with:
-                  python-version: "3.12"
-
-            - name: Zip and Deploy Process Lambda
+            - name: Sync files to S3
               run: |
-                  cd backend/process-uploaded-file
-                  zip -r process_lambda.zip .
-                  aws lambda update-function-code \
-                    --function-name ${{ env.PROCESS_LAMBDA }} \
-                    --zip-file fileb://process_lambda.zip
+                  aws s3 sync frontend/ s3://${{ env.S3_BUCKET }} --delete
 
-            - name: Zip and Deploy Generate URL Lambda
+            - name: Invalidate CloudFront cache
               run: |
-                  cd backend/generate-presigned-url
-                  zip -r generate_lambda.zip .
-                  aws lambda update-function-code \
-                    --function-name ${{ env.GENERATE_LAMBDA }} \
-                    --zip-file fileb://generate_lambda.zip
-
-            # Observability: Confirm the deployment actually worked
-            - name: Verify Deployment
-              run: |
-                  aws lambda wait function-updated --function-name ${{ env.PROCESS_LAMBDA }}
-                  echo "Deployment successful!"
+                  aws cloudfront create-invalidation \
+                    --distribution-id ${{ env.CLOUDFRONT_DIST_ID }} \
+                    --paths "/*"
